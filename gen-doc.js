@@ -1,4 +1,4 @@
-const fs = require('fs');
+const fs = require('node:fs');
 const { marked } = require('marked');
 
 const md = fs.readFileSync('README.md', 'utf8');

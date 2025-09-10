@@ -1,4 +1,4 @@
-import { type LogForwardOptions, WebpackLogForwardPlugin } from '../index';
+import { type LogForwardOptions, type LogType, WebpackLogForwardPlugin } from '../index';
 
 describe('WebpackLogForwardPlugin', () => {
   let mockCompiler: any;
@@ -112,7 +112,7 @@ describe('WebpackLogForwardPlugin', () => {
     });
 
     it('should accept custom log types', () => {
-      const customLogTypes = ['error', 'warn'];
+      const customLogTypes: LogType[] = ['error', 'warn'];
       const plugin = new WebpackLogForwardPlugin({ logTypes: customLogTypes });
       expect(plugin.getOptions().logTypes).toEqual(customLogTypes);
     });
