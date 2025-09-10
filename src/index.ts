@@ -1,11 +1,6 @@
-import {
-  Compilation,
-  type Compiler,
-  sources,
-  type WebpackPluginInstance,
-} from "webpack";
+import { Compilation, type Compiler, sources, type WebpackPluginInstance } from 'webpack';
 
-type LogType = "log" | "info" | "warn" | "error" | "debug";
+export type LogType = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
 export interface LogForwardOptions {
   /**
@@ -31,10 +26,10 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
 
   constructor(options: LogForwardOptions = {}) {
     this.options = {
-      logTypes: options.logTypes || ["log", "info", "warn", "error", "debug"],
+      logTypes: options.logTypes || ['log', 'info', 'warn', 'error', 'debug'],
       enabled: options.enabled !== false,
-      prefix: options.prefix || "[Browser]",
-      includeTimestamp: options.includeTimestamp !== false,
+      prefix: options.prefix || '[Browser]',
+      includeTimestamp: options.includeTimestamp !== false
     };
   }
 
@@ -45,7 +40,7 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
 
   apply(compiler: Compiler): void {
     // Only apply in development mode
-    if (compiler.options.mode !== "development") {
+    if (compiler.options.mode !== 'development') {
       return;
     }
 
@@ -56,8 +51,9 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
     if (!compiler.options.devServer) {
       // add log to tell user should not use this plugin in production
       console.warn(
-        "[WebpackLogForwardPlugin] This plugin suppose to be used with webpack dev server only, please DO NOT use it in production mode"
+        '[WebpackLogForwardPlugin] This plugin suppose to be used with webpack dev server only, please DO NOT use it in production mode'
       );
+      return;
     }
 
     // Log that plugin is active and logs will be forwarded
@@ -69,32 +65,29 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
     this.setupDevServerMiddleware(compiler);
 
     // Inject the log forwarding code at the beginning of each chunk
-    compiler.hooks.thisCompilation.tap(
-      "WebpackLogForwardPlugin",
-      (compilation) => {
-        compilation.hooks.processAssets.tap(
-          {
-            name: "WebpackLogForwardPlugin",
-            stage: Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_INLINE,
-          },
-          (assets) => {
-            const logForwardScript = this.generateLogForwardScript();
+    compiler.hooks.thisCompilation.tap('WebpackLogForwardPlugin', (compilation) => {
+      compilation.hooks.processAssets.tap(
+        {
+          name: 'WebpackLogForwardPlugin',
+          stage: Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_INLINE
+        },
+        (assets) => {
+          const logForwardScript = this.generateLogForwardScript();
 
-            // Add the script to all JS assets
-            Object.keys(assets).forEach((assetName) => {
-              if (assetName.endsWith(".js")) {
-                const asset = assets[assetName];
-                const newSource = new sources.ConcatSource(
-                  new sources.RawSource(`${logForwardScript}\n`),
-                  asset
-                );
-                compilation.updateAsset(assetName, newSource);
-              }
-            });
-          }
-        );
-      }
-    );
+          // Add the script to all JS assets
+          Object.keys(assets).forEach((assetName) => {
+            if (assetName.endsWith('.js')) {
+              const asset = assets[assetName];
+              const newSource = new sources.ConcatSource(
+                new sources.RawSource(`${logForwardScript}\n`),
+                asset
+              );
+              compilation.updateAsset(assetName, newSource);
+            }
+          });
+        }
+      );
+    });
   }
 
   private generateLogForwardScript(): string {
@@ -168,48 +161,29 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
     }
   }
   
-  // SOLUTION: Use monkey patching at the very beginning before extensions load
-  // and create a transparent wrapper that doesn't break the console chain
-  
-  if (!window._webpackLogForwardInstalled) {
-    window._webpackLogForwardInstalled = true;
-    
-    // Store the absolute original console methods immediately
-    const originalConsole = Object.create(null);
-    ['log', 'info', 'warn', 'error', 'debug'].forEach(method => {
-      originalConsole[method] = console[method].bind(console);
-    });
-    
-    // Create transparent wrappers that preserve all behavior
-    ['log', 'info', 'warn', 'error', 'debug'].forEach(method => {
-      const original = originalConsole[method];
-      
-      // Replace with a function that behaves identically to the original
-      console[method] = function(...args) {
-        // Execute original console method with exact same behavior
-        try {
-          original(...args);
-        } catch (e) {
-          // If original throws, we still throw
-          throw e;
-        }
-        
-        // Asynchronously forward logs (completely separate from console execution)
-        requestAnimationFrame(() => {
-          try {
-            forwardLog(method, args);
-          } catch (e) {
-            // Silently ignore forwarding errors to avoid recursion
+    // Install a Proxy to keep forwarding active even if console methods are reassigned
+    if (!window._webpackLogForwardInstalled) {
+      window._webpackLogForwardInstalled = true;
+
+      const consoleProxy = new Proxy(console, {
+        get(target, prop) {
+          const original = target[prop];
+          if (logTypes.includes(prop) && typeof original === 'function') {
+            return (...args) => {
+              original.apply(target, args);
+              forwardLog(prop, args);
+            };
           }
-        });
-      };
-      
-      // Preserve function properties and prototype
-      Object.setPrototypeOf(console[method], original);
-      Object.defineProperty(console[method], 'name', { value: method });
-      Object.defineProperty(console[method], 'length', { value: original.length });
-    });
-  }
+          return typeof original === 'function' ? original.bind(target) : original;
+        },
+        set(target, prop, value) {
+          target[prop] = value;
+          return true;
+        }
+      });
+
+      window.console = consoleProxy;
+    }
   
   // Also provide a clean API for manual logging
   window.webpackLog = {
@@ -235,97 +209,85 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
   private setupDevServerMiddleware(compiler: Compiler): void {
     const devServerOptions = compiler.options.devServer;
     if (devServerOptions) {
-      console.log("WebpackLogForwardPlugin: Setting up middleware...");
+      console.log('WebpackLogForwardPlugin: Setting up middleware...');
 
       // Use onBeforeSetupMiddleware if available (older webpack-dev-server versions)
       if (!devServerOptions.setupMiddlewares) {
         devServerOptions.onBeforeSetupMiddleware = (devServer: any) => {
-          devServer.app.post(
-            "/__webpack_log_forward__",
-            (req: any, res: any) => {
-              let body = "";
-              req.on("data", (chunk: Buffer) => {
-                body += chunk.toString();
-              });
-              req.on("end", () => {
-                try {
-                  const logData = JSON.parse(body);
-                  this.forwardLogToTerminal(logData);
-                  res.json({ success: true });
-                } catch (error) {
-                  console.error("Log forward error:", error);
-                  res.status(400).json({ error: "Invalid JSON" });
-                }
-              });
-            }
-          );
+          devServer.app.post('/__webpack_log_forward__', (req: any, res: any) => {
+            let body = '';
+            req.on('data', (chunk: Buffer) => {
+              body += chunk.toString();
+            });
+            req.on('end', () => {
+              try {
+                const logData = JSON.parse(body);
+                this.forwardLogToTerminal(logData);
+                res.json({ success: true });
+              } catch (error) {
+                console.error('Log forward error:', error);
+                res.status(400).json({ error: 'Invalid JSON' });
+              }
+            });
+          });
         };
       } else {
         // Store reference to the original setupMiddlewares function
         const originalSetupMiddlewares = devServerOptions.setupMiddlewares;
 
         // Override setupMiddlewares to add our middleware
-        devServerOptions.setupMiddlewares = (
-          middlewares: any,
-          devServer: any
-        ) => {
+        devServerOptions.setupMiddlewares = (middlewares: any, devServer: any) => {
           // Add middleware directly to express app if available
           if (devServer.app) {
-            devServer.app.post(
-              "/__webpack_log_forward__",
-              (req: any, res: any) => {
-                let body = "";
-                req.on("data", (chunk: Buffer) => {
-                  body += chunk.toString();
-                });
-                req.on("end", () => {
-                  try {
-                    const logData = JSON.parse(body);
-                    this.forwardLogToTerminal(logData);
-                    res.json({ success: true });
-                  } catch (error) {
-                    console.error("Log forward error:", error);
-                    res.status(400).json({ error: "Invalid JSON" });
-                  }
-                });
-              }
-            );
+            devServer.app.post('/__webpack_log_forward__', (req: any, res: any) => {
+              let body = '';
+              req.on('data', (chunk: Buffer) => {
+                body += chunk.toString();
+              });
+              req.on('end', () => {
+                try {
+                  const logData = JSON.parse(body);
+                  this.forwardLogToTerminal(logData);
+                  res.json({ success: true });
+                } catch (error) {
+                  console.error('Log forward error:', error);
+                  res.status(400).json({ error: 'Invalid JSON' });
+                }
+              });
+            });
           }
 
           // Also try the middleware approach
           middlewares.unshift({
-            name: "webpack-log-forward",
-            path: "/__webpack_log_forward__",
+            name: 'webpack-log-forward',
+            path: '/__webpack_log_forward__',
             middleware: (req: any, res: any, next: any) => {
-              if (
-                req.method === "POST" &&
-                req.url === "/__webpack_log_forward__"
-              ) {
-                let body = "";
-                req.on("data", (chunk: Buffer) => {
+              if (req.method === 'POST' && req.url === '/__webpack_log_forward__') {
+                let body = '';
+                req.on('data', (chunk: Buffer) => {
                   body += chunk.toString();
                 });
-                req.on("end", () => {
+                req.on('end', () => {
                   try {
                     const logData = JSON.parse(body);
                     this.forwardLogToTerminal(logData);
                     res.writeHead(200, {
-                      "Content-Type": "application/json",
-                      "Access-Control-Allow-Origin": "*",
-                      "Access-Control-Allow-Methods": "POST",
-                      "Access-Control-Allow-Headers": "Content-Type",
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*',
+                      'Access-Control-Allow-Methods': 'POST',
+                      'Access-Control-Allow-Headers': 'Content-Type'
                     });
                     res.end(JSON.stringify({ success: true }));
                   } catch (error) {
-                    console.error("Log forward error:", error);
-                    res.writeHead(400, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ error: "Invalid JSON" }));
+                    console.error('Log forward error:', error);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid JSON' }));
                   }
                 });
               } else {
                 next();
               }
-            },
+            }
           });
 
           // Call the original setupMiddlewares if it exists
@@ -344,31 +306,31 @@ export class WebpackLogForwardPlugin implements WebpackPluginInstance {
 
     // Color codes for different log types
     const colors = {
-      log: "\x1b[36m", // Cyan
-      info: "\x1b[32m", // Green
-      warn: "\x1b[33m", // Yellow
-      error: "\x1b[31m", // Red
-      debug: "\x1b[35m", // Magenta
+      log: '\x1b[36m', // Cyan
+      info: '\x1b[32m', // Green
+      warn: '\x1b[33m', // Yellow
+      error: '\x1b[31m', // Red
+      debug: '\x1b[35m' // Magenta
     };
 
-    const reset = "\x1b[0m";
+    const reset = '\x1b[0m';
     const color = colors[type as keyof typeof colors] || colors.log;
 
-    const timestampStr = timestamp || "";
+    const timestampStr = timestamp || '';
     const logMessage = `${color}${prefix} ${type.toUpperCase()}:${reset} ${timestampStr}${message}`;
 
     // Use console methods to maintain proper formatting
     switch (type) {
-      case "error":
+      case 'error':
         console.error(logMessage);
         break;
-      case "warn":
+      case 'warn':
         console.warn(logMessage);
         break;
-      case "info":
+      case 'info':
         console.info(logMessage);
         break;
-      case "debug":
+      case 'debug':
         console.debug(logMessage);
         break;
       default:
